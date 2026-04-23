@@ -640,6 +640,11 @@ INSERT INTO ComplaintCategories (category_name, department_id)
 VALUES
 ('Internet Issue', 1),
 ('Lab Equipment', 1),
+('Software License Issue', 1),
+('Printer Problems', 1),
+('Database Access', 1),
+('Server Downtime', 1),
+('WiFi Connectivity', 1),
 ('Power Failure', 2),
 ('Course Registration', 4);
 
@@ -1237,9 +1242,225 @@ BEGIN
          WHERE c.assigned_to_staff_id = @StaffId) AS AvgRating
 END;
 GO
+GO
 
+CREATE OR ALTER PROCEDURE GetComplaintCategories
+    @DepartmentId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT category_id, category_name, department_id
+    FROM ComplaintCategories
+    WHERE @DepartmentId IS NULL OR department_id = @DepartmentId;
+END;
+GO
 
+CREATE OR ALTER PROCEDURE SubmitComplaint
+    @StudentId    INT,
+    @DepartmentId INT,
+    @CategoryId   INT,
+    @Title        VARCHAR(200),
+    @Description  TEXT,
+    @Priority     VARCHAR(10) = 'Medium',
+    @ResultCode   INT OUTPUT,
+    @ResultMessage VARCHAR(200) OUTPUT,
+    @NewComplaintId INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET @ResultCode = 0;
+    SET @ResultMessage = '';
+    SET @NewComplaintId = NULL;
 
+    BEGIN TRY
+        -- Validation
+        IF @StudentId IS NULL OR @DepartmentId IS NULL OR @Title IS NULL OR @Description IS NULL
+        BEGIN
+            SET @ResultCode = 1;
+            SET @ResultMessage = 'Required fields missing.';
+            RETURN;
+        END
 
+        INSERT INTO Complaints (student_id, department_id, category_id, title, description, priority, status, submission_date)
+        VALUES (@StudentId, @DepartmentId, @CategoryId, @Title, @Description, @Priority, 'Pending', GETDATE());
 
-
+        SET @NewComplaintId = SCOPE_IDENTITY();
+
+        -- Log to History
+        INSERT INTO History (complaint_id, changed_by_student_id, action_type, remarks)
+        VALUES (@NewComplaintId, @StudentId, 'StatusChange', 'Complaint submitted');
+
+        SET @ResultCode = 0;
+        SET @ResultMessage = 'Complaint submitted successfully.';
+    END TRY
+    BEGIN CATCH
+        SET @ResultCode = 2;
+        SET @ResultMessage = 'Error: ' + ERROR_MESSAGE();
+    END CATCH
+END;
+GO
+
+CREATE OR ALTER PROCEDURE GetStudentComplaints
+    @StudentId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        c.complaint_id,
+        c.title,
+        c.description,
+        c.priority,
+        c.status,
+        c.submission_date,
+        c.deadline,
+        c.assignment_date,
+
+        -- Department
+        d.department_name,
+        c.department_id,
+
+        -- Category
+        cc.category_name,
+
+        -- Assigned staff (if any)
+        st.name        AS assigned_to_staff_name
+
+    FROM Complaints c
+    JOIN  Departments        d  ON d.department_id  = c.department_id
+    LEFT JOIN ComplaintCategories cc ON cc.category_id = c.category_id
+    LEFT JOIN Staff          st ON st.staff_id       = c.assigned_to_staff_id
+
+    WHERE c.student_id = @StudentId
+    ORDER BY c.submission_date DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE RequestReopenComplaint
+    @ComplaintId INT,
+    @StudentId   INT,
+    @Remarks     VARCHAR(MAX),
+    @ResultCode  INT OUTPUT,
+    @ResultMessage VARCHAR(200) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET @ResultCode = 0;
+    SET @ResultMessage = '';
+
+    BEGIN TRY
+        IF NOT EXISTS (SELECT 1 FROM Complaints WHERE complaint_id = @ComplaintId AND student_id = @StudentId)
+        BEGIN
+            SET @ResultCode = 1;
+            SET @ResultMessage = 'Complaint not found or unauthorized.';
+            RETURN;
+        END
+
+        -- Update status
+        UPDATE Complaints
+        SET status = 'Reopened'
+        WHERE complaint_id = @ComplaintId;
+
+        -- Log to History
+        INSERT INTO History (complaint_id, changed_by_student_id, action_type, remarks)
+        VALUES (@ComplaintId, @StudentId, 'ReopenRequest', @Remarks);
+
+        -- Notify Admin/Staff
+        DECLARE @StaffId INT, @AdminId INT, @Title VARCHAR(200);
+        SELECT @StaffId = assigned_to_staff_id, @AdminId = assigned_by_admin_id, @Title = title
+        FROM Complaints
+        WHERE complaint_id = @ComplaintId;
+
+        IF @StaffId IS NOT NULL
+        BEGIN
+            INSERT INTO Notifications (complaint_id, staff_id, notification_type, message)
+            VALUES (@ComplaintId, @StaffId, 'ReopenRequest', 'Student requested reopen for: ' + @Title);
+        END
+
+        -- Also notify Admin if assigned by one
+        IF @AdminId IS NOT NULL
+        BEGIN
+            INSERT INTO Notifications (complaint_id, admin_id, notification_type, message)
+            VALUES (@ComplaintId, @AdminId, 'ReopenRequest', 'Student requested reopen for: ' + @Title);
+        END
+
+        SET @ResultCode = 0;
+        SET @ResultMessage = 'Complaint reopened successfully.';
+    END TRY
+    BEGIN CATCH
+        SET @ResultCode = 2;
+        SET @ResultMessage = 'Error: ' + ERROR_MESSAGE();
+    END CATCH
+END;
+GO
+
+CREATE OR ALTER PROCEDURE GetStudentNotifications
+    @StudentId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT 
+        notification_id,
+        complaint_id,
+        notification_type,
+        message,
+        is_read,
+        created_at
+    FROM Notifications
+    WHERE student_id = @StudentId
+    ORDER BY created_at DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE GetStudentProfile
+    @StudentId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT 
+        s.student_id,
+        s.name,
+        s.email,
+        s.phone_number,
+        d.department_name,
+        s.department_id,
+        s.created_at
+    FROM Students s
+    LEFT JOIN Departments d ON s.department_id = d.department_id
+    WHERE s.student_id = @StudentId;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE UpdateStudentProfile
+    @StudentId    INT,
+    @Name         VARCHAR(100),
+    @PhoneNumber  VARCHAR(15),
+    @PasswordHash VARCHAR(255) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE Students
+    SET name = @Name,
+        phone_number = @PhoneNumber,
+        password_hash = ISNULL(@PasswordHash, password_hash)
+    WHERE student_id = @StudentId;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE GetAdminNotifications
+    @AdminId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT 
+        notification_id,
+        complaint_id,
+        notification_type,
+        message,
+        is_read,
+        created_at
+    FROM Notifications
+    WHERE admin_id = @AdminId
+    ORDER BY created_at DESC;
+END;
+GO

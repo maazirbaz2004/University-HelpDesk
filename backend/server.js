@@ -29,7 +29,15 @@ const {
     assignComplaintToStaff,
     getStaffByDepartment,
     submitFeedback,
-    getStaffAnalytics
+    getStaffAnalytics,
+    getComplaintCategories,
+    submitComplaint,
+    getStudentComplaints,
+    reopenComplaint,
+    getStudentNotifications,
+    getStudentProfile,
+    updateStudentProfile,
+    getAdminNotifications
 } = require('./db');
 const bcrypt = require('bcrypt');
 const app = express();
@@ -334,6 +342,27 @@ app.patch('/api/admin/profile', requireAuth(['Admin']), async (req, res) => {
     }
 });
 
+app.get('/api/admin/notifications', requireAuth(['Admin']), async (req, res) => {
+    try {
+        const result = await getAdminNotifications(req.user.userId);
+        res.status(200).json(result);
+    } catch (error) {
+        console.error('Error fetching admin notifications:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.patch('/api/admin/notifications/:id/read', requireAuth(['Admin']), async (req, res) => {
+    const { id } = req.params;
+    try {
+        await markNotificationAsRead(id);
+        res.status(200).json({ message: 'Notification marked as read' });
+    } catch (error) {
+        console.error('Error marking as read:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 // ── Staff: Operations ─────────────────────────────────────────────────────────
 app.get('/api/staff/complaints', requireAuth(['Staff']), async (req, res) => {
     const { status } = req.query;
@@ -439,6 +468,113 @@ app.post('/api/student/feedback', requireAuth(['Student']), async (req, res) => 
         res.status(201).json({ message: 'Feedback submitted successfully' });
     } catch (error) {
         console.error('Error submitting feedback:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.get('/api/categories', async (req, res) => {
+    const { departmentId } = req.query;
+    try {
+        const result = await getComplaintCategories(departmentId);
+        res.status(200).json(result);
+    } catch (error) {
+        console.error('Error fetching categories:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.post('/api/student/complaints', requireAuth(['Student']), async (req, res) => {
+    const { departmentId, categoryId, title, description, priority } = req.body;
+    const studentId = req.user.userId;
+    if (!departmentId || !title || !description) {
+        return res.status(400).json({ error: 'Required fields missing' });
+    }
+    try {
+        const result = await submitComplaint({ studentId, departmentId, categoryId, title, description, priority });
+        const { ResultCode, ResultMessage, NewComplaintId } = result[0] ?? {};
+        if (ResultCode === 0) {
+            return res.status(201).json({ message: ResultMessage, complaintId: NewComplaintId });
+        } else {
+            return res.status(400).json({ error: ResultMessage });
+        }
+    } catch (error) {
+        console.error('Error submitting complaint:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.get('/api/student/complaints', requireAuth(['Student']), async (req, res) => {
+    const studentId = req.user.userId;
+    try {
+        const result = await getStudentComplaints(studentId);
+        res.status(200).json(result);
+    } catch (error) {
+        console.error('Error fetching student complaints:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.post('/api/student/complaints/:id/reopen', requireAuth(['Student']), async (req, res) => {
+    const { id } = req.params;
+    const { remarks } = req.body;
+    const studentId = req.user.userId;
+    if (!remarks) return res.status(400).json({ error: 'Remarks (reason) is required' });
+    try {
+        const result = await reopenComplaint(id, studentId, remarks);
+        const { ResultCode, ResultMessage } = result[0] ?? {};
+        if (ResultCode === 0) return res.status(200).json({ message: ResultMessage });
+        return res.status(400).json({ error: ResultMessage });
+    } catch (error) {
+        console.error('Error reopening complaint:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.get('/api/student/notifications', requireAuth(['Student']), async (req, res) => {
+    try {
+        const result = await getStudentNotifications(req.user.userId);
+        res.status(200).json(result);
+    } catch (error) {
+        console.error('Error fetching student notifications:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.patch('/api/student/notifications/:id/read', requireAuth(['Student']), async (req, res) => {
+    const { id } = req.params;
+    try {
+        await markNotificationAsRead(id);
+        res.status(200).json({ message: 'Notification marked as read' });
+    } catch (error) {
+        console.error('Error marking as read:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.get('/api/student/profile', requireAuth(['Student']), async (req, res) => {
+    try {
+        const result = await getStudentProfile(req.user.userId);
+        if (result.length === 0) return res.status(404).json({ error: 'Profile not found' });
+        res.status(200).json(result[0]);
+    } catch (error) {
+        console.error('Error fetching student profile:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.put('/api/student/profile', requireAuth(['Student']), async (req, res) => {
+    const { name, phoneNumber, password } = req.body;
+    const studentId = req.user.userId;
+    if (!name || !phoneNumber) return res.status(400).json({ error: 'Name and Phone Number are required' });
+    try {
+        let passwordHash = null;
+        if (password) {
+            passwordHash = await bcrypt.hash(password, 10);
+        }
+        await updateStudentProfile({ studentId, name, phoneNumber, passwordHash });
+        res.status(200).json({ message: 'Profile updated successfully' });
+    } catch (error) {
+        console.error('Error updating student profile:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });

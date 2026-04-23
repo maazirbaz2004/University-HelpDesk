@@ -13,6 +13,10 @@ import AdminProfile from "./pages/admin/AdminProfile";
 import StaffComplaints from "./pages/staff/StaffComplaints";
 import StaffProfile from "./pages/staff/StaffProfile";
 import StaffFeedback from "./pages/staff/StaffFeedback";
+import SubmitComplaint from "./pages/student/SubmitComplaint";
+import MyComplaints from "./pages/student/MyComplaints";
+import StudentNotifications from "./pages/student/StudentNotifications";
+import StudentProfile from "./pages/student/StudentProfile";
 
 function App() {
   return (
@@ -23,6 +27,10 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/student/dashboard" element={<StudentDashboard />} />
+        <Route path="/student/submit-complaint" element={<SubmitComplaint />} />
+        <Route path="/student/my-complaints" element={<MyComplaints />} />
+        <Route path="/student/notifications" element={<StudentNotifications />} />
+        <Route path="/student/profile" element={<StudentProfile />} />
         <Route path="/staff/dashboard" element={<StaffDashboard />} />
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
         <Route path="/admin/complaints" element={<ManageComplaints />} />

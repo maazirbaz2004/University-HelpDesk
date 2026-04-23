@@ -479,6 +479,96 @@ const submitFeedback = async (complaintId, studentId, rating, comments) => {
     return await executeQuery(query, parameters);
 };
 
+const getComplaintCategories = async (departmentId = null) => {
+    const query = `EXEC GetComplaintCategories @DepartmentId = @DepartmentId;`;
+    const parameters = [
+        { name: 'DepartmentId', type: TYPES.Int, value: departmentId ? parseInt(departmentId) : null }
+    ];
+    return await executeQuery(query, parameters);
+};
+
+const submitComplaint = async (data) => {
+    const query = `
+        DECLARE @ResultCode INT, @ResultMessage VARCHAR(200), @NewComplaintId INT;
+        EXEC SubmitComplaint
+            @StudentId = @StudentId,
+            @DepartmentId = @DepartmentId,
+            @CategoryId = @CategoryId,
+            @Title = @Title,
+            @Description = @Description,
+            @Priority = @Priority,
+            @ResultCode = @ResultCode OUTPUT,
+            @ResultMessage = @ResultMessage OUTPUT,
+            @NewComplaintId = @NewComplaintId OUTPUT;
+        SELECT @ResultCode AS ResultCode, @ResultMessage AS ResultMessage, @NewComplaintId AS NewComplaintId;
+    `;
+    const parameters = [
+        { name: 'StudentId', type: TYPES.Int, value: parseInt(data.studentId) },
+        { name: 'DepartmentId', type: TYPES.Int, value: parseInt(data.departmentId) },
+        { name: 'CategoryId', type: TYPES.Int, value: data.categoryId ? parseInt(data.categoryId) : null },
+        { name: 'Title', type: TYPES.VarChar, value: data.title },
+        { name: 'Description', type: TYPES.Text, value: data.description },
+        { name: 'Priority', type: TYPES.VarChar, value: data.priority || 'Medium' }
+    ];
+    return await executeQuery(query, parameters);
+};
+
+const getStudentComplaints = async (studentId) => {
+    const query = `EXEC GetStudentComplaints @StudentId = @StudentId;`;
+    const parameters = [
+        { name: 'StudentId', type: TYPES.Int, value: parseInt(studentId) }
+    ];
+    return await executeQuery(query, parameters);
+};
+
+const reopenComplaint = async (complaintId, studentId, remarks) => {
+    const query = `
+        DECLARE @ResultCode INT, @ResultMessage VARCHAR(200);
+        EXEC RequestReopenComplaint
+            @ComplaintId = @ComplaintId,
+            @StudentId   = @StudentId,
+            @Remarks     = @Remarks,
+            @ResultCode  = @ResultCode OUTPUT,
+            @ResultMessage = @ResultMessage OUTPUT;
+        SELECT @ResultCode AS ResultCode, @ResultMessage AS ResultMessage;
+    `;
+    const parameters = [
+        { name: 'ComplaintId', type: TYPES.Int, value: parseInt(complaintId) },
+        { name: 'StudentId', type: TYPES.Int, value: parseInt(studentId) },
+        { name: 'Remarks', type: TYPES.Text, value: remarks }
+    ];
+    return await executeQuery(query, parameters);
+};
+
+const getStudentNotifications = async (studentId) => {
+    const query = 'EXEC GetStudentNotifications @StudentId = @StudentId';
+    const parameters = [{ name: 'StudentId', type: TYPES.Int, value: parseInt(studentId) }];
+    return await executeQuery(query, parameters);
+};
+
+const getStudentProfile = async (studentId) => {
+    const query = 'EXEC GetStudentProfile @StudentId = @StudentId';
+    const parameters = [{ name: 'StudentId', type: TYPES.Int, value: parseInt(studentId) }];
+    return await executeQuery(query, parameters);
+};
+
+const updateStudentProfile = async (data) => {
+    const query = 'EXEC UpdateStudentProfile @StudentId = @StudentId, @Name = @Name, @PhoneNumber = @PhoneNumber, @PasswordHash = @PasswordHash';
+    const parameters = [
+        { name: 'StudentId', type: TYPES.Int, value: parseInt(data.studentId) },
+        { name: 'Name', type: TYPES.VarChar, value: data.name },
+        { name: 'PhoneNumber', type: TYPES.VarChar, value: data.phoneNumber },
+        { name: 'PasswordHash', type: TYPES.VarChar, value: data.passwordHash || null }
+    ];
+    return await executeQuery(query, parameters);
+};
+
+const getAdminNotifications = async (adminId) => {
+    const query = 'EXEC GetAdminNotifications @AdminId = @AdminId';
+    const parameters = [{ name: 'AdminId', type: TYPES.Int, value: parseInt(adminId) }];
+    return await executeQuery(query, parameters);
+};
+
 module.exports = {
     registerStudent,
     getDepartments,
@@ -507,5 +597,13 @@ module.exports = {
     assignComplaintToStaff,
     getStaffByDepartment,
     submitFeedback,
-    getStaffAnalytics
+    getStaffAnalytics,
+    getComplaintCategories,
+    submitComplaint,
+    getStudentComplaints,
+    reopenComplaint,
+    getStudentNotifications,
+    getStudentProfile,
+    updateStudentProfile,
+    getAdminNotifications
 };
