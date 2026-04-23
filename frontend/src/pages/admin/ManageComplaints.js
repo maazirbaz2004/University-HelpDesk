@@ -35,6 +35,33 @@ export default function ManageComplaints() {
   const [updatingId, setUpdatingId] = useState(null);
   const [updateMsg, setUpdateMsg] = useState({});
 
+  // Staff members for assignment
+  const [allStaff, setAllStaff] = useState([]);
+
+  const fetchAllStaff = async () => {
+    try {
+      // We can use the existing users endpoint and filter for staff
+      const res = await axios.get('/api/admin/users', { withCredentials: true });
+      const staffOnly = res.data.filter(u => u.role === 'Staff' && u.is_active);
+      setAllStaff(staffOnly);
+    } catch (err) {
+      console.error('Error fetching staff list:', err);
+    }
+  };
+
+  const handleAssign = async (complaintId, staffId) => {
+    setUpdatingId(complaintId);
+    try {
+      await axios.patch(`/api/admin/complaints/${complaintId}/assign`, { staffId }, { withCredentials: true });
+      setUpdateMsg(prev => ({ ...prev, [complaintId]: 'ok' }));
+      fetchComplaints(); // refresh to move to assigned tab
+    } catch {
+      setUpdateMsg(prev => ({ ...prev, [complaintId]: 'err' }));
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
   // Fetch complaints
   const fetchComplaints = useCallback(async () => {
     setLoading(true);
@@ -63,7 +90,10 @@ export default function ManageComplaints() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => { fetchComplaints(); }, [fetchComplaints]);
+  useEffect(() => {
+    fetchComplaints();
+    fetchAllStaff();
+  }, [fetchComplaints]);
 
   // Update complain priority
   const handlePriorityChange = async (complaintId, newPriority) => {
@@ -212,6 +242,8 @@ export default function ManageComplaints() {
                 onPriorityChange={handlePriorityChange}
                 onStatusChange={handleStatusChange}
                 onHistory={openHistory}
+                allStaff={allStaff}
+                onAssign={handleAssign}
               />
             ))}
           </div>
@@ -277,10 +309,13 @@ export default function ManageComplaints() {
 }
 
 // ── Complaint Card ──────────────────────────────────────────────────────────────
-function ComplaintCard({ c, updatingId, updateMsg, onPriorityChange, onStatusChange, onHistory }) {
+function ComplaintCard({ c, updatingId, updateMsg, onPriorityChange, onStatusChange, onHistory, allStaff, onAssign }) {
   const priColor = PRIORITY_COLORS[c.priority] || PRIORITY_COLORS.Medium;
   const stColor  = STATUS_COLORS[c.status]     || STATUS_COLORS.Pending;
   const msg      = updateMsg[c.complaint_id];
+
+  // Filter staff for THIS complaint's department
+  const deptStaff = allStaff.filter(s => Number(s.department_id) === Number(c.department_id));
 
   return (
     <div style={S.card}>
@@ -324,9 +359,28 @@ function ComplaintCard({ c, updatingId, updateMsg, onPriorityChange, onStatusCha
         <span>📅 {c.submission_date ? new Date(c.submission_date).toLocaleDateString() : '—'}</span>
       </p>
 
-      {/* Assigned to */}
-      {c.assigned_to_staff_name && (
+      {/* Assigned to / Assignment Control */}
+      {c.assigned_to_staff_name ? (
         <p style={S.assignedTo}>🔧 Assigned to: <strong>{c.assigned_to_staff_name}</strong></p>
+      ) : (
+        <div style={S.assignBox}>
+            <span style={S.assignLabel}>Unassigned - Assign to:</span>
+            <select 
+                style={S.assignSelect} 
+                onChange={(e) => onAssign(c.complaint_id, e.target.value)}
+                disabled={updatingId === c.complaint_id}
+                value=""
+            >
+                <option value="" disabled>Select Staff...</option>
+                {deptStaff.length > 0 ? (
+                  deptStaff.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))
+                ) : (
+                  <option disabled>No staff in this department</option>
+                )}
+            </select>
+        </div>
       )}
 
       {/* ── Priority changer ── */}
@@ -404,6 +458,9 @@ const S = {
   description: { fontSize: '13px', color: '#94a3b8', lineHeight: '1.5', margin: '0 0 0.75rem' },
   smallMeta: { display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#475569', margin: '0 0 0.5rem' },
   assignedTo: { fontSize: '12px', color: '#7dd3fc', margin: '0 0 0.75rem' },
+  assignBox: { margin: '0 0 1rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' },
+  assignLabel: { fontSize: '11px', color: '#f87171', fontWeight: '600' },
+  assignSelect: { background: '#111827', color: '#f1f5f9', border: '1px solid #f59e0b', borderRadius: '8px', padding: '6px', fontSize: '12px', cursor: 'pointer', outline: 'none' },
 
   // Priority
   priorityRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0.75rem 0 0.75rem', gap: '0.5rem', flexWrap: 'wrap' },

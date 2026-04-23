@@ -332,6 +332,7 @@ BEGIN
 
         -- Department
         d.department_name,
+        c.department_id,
 
         -- Category
         cc.category_name,
@@ -414,11 +415,33 @@ BEGIN
         SET @ResultMessage = 'Department updated successfully.';
     END TRY
     BEGIN CATCH
-        SET @ResultCode = 3;
+        SET @ResultCode = 4;
         SET @ResultMessage = 'Error: ' + ERROR_MESSAGE();
     END CATCH
 END;
 GO
+
+CREATE OR ALTER PROCEDURE GetStaffFeedback
+    @StaffId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT 
+        f.feedback_id,
+        f.rating,
+        f.comments,
+        f.feedback_date,
+        c.complaint_id,
+        c.title AS complaint_title,
+        s.name AS student_name
+    FROM Feedback f
+    JOIN Complaints c ON f.complaint_id = c.complaint_id
+    JOIN Students s ON f.student_id = s.student_id
+    WHERE c.assigned_to_staff_id = @StaffId
+    ORDER BY f.feedback_date DESC;
+END;
+GO
+
 
 CREATE OR ALTER PROCEDURE UpdateComplaintPriority
     @ComplaintId  INT,
@@ -654,6 +677,7 @@ BEGIN
         s.email,
         s.phone,
         d.department_name,
+        s.department_id,
         s.is_active,
         'Student' AS role
     FROM Students s
@@ -668,6 +692,7 @@ BEGIN
         st.email,
         st.phone,
         d.department_name,
+        st.department_id,
         st.is_active,
         'Staff' AS role
     FROM Staff st
@@ -902,3 +927,319 @@ BEGIN
     END CATCH
 END;
 GO
+
+CREATE OR ALTER PROCEDURE GetStaffProfile
+    @StaffId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT staff_id, name, email, phone, department_id
+    FROM Staff
+    WHERE staff_id = @StaffId;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE UpdateStaffProfile
+    @StaffId       INT,
+    @Name          VARCHAR(100),
+    @Phone         VARCHAR(20),
+    @Password      VARCHAR(255) = NULL, -- Optional password update
+    @ResultCode    INT OUTPUT,
+    @ResultMessage VARCHAR(200) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET @ResultCode = 0;
+    SET @ResultMessage = '';
+
+    BEGIN TRY
+        IF NOT EXISTS (SELECT 1 FROM Staff WHERE staff_id = @StaffId)
+        BEGIN
+            SET @ResultCode = 1;
+            SET @ResultMessage = 'Staff member not found.';
+            RETURN;
+        END
+
+        IF @Password IS NOT NULL AND LTRIM(RTRIM(@Password)) <> ''
+        BEGIN
+            UPDATE Staff
+            SET name = LTRIM(RTRIM(@Name)),
+                phone = LTRIM(RTRIM(@Phone)),
+                password = @Password
+            WHERE staff_id = @StaffId;
+        END
+        ELSE
+        BEGIN
+            UPDATE Staff
+            SET name = LTRIM(RTRIM(@Name)),
+                phone = LTRIM(RTRIM(@Phone))
+            WHERE staff_id = @StaffId;
+        END
+
+        SET @ResultCode = 0;
+        SET @ResultMessage = 'Profile updated successfully.';
+    END TRY
+    BEGIN CATCH
+        SET @ResultCode = 2;
+        SET @ResultMessage = 'Error: ' + ERROR_MESSAGE();
+    END CATCH
+END;
+GO
+
+CREATE OR ALTER PROCEDURE GetAssignedComplaintsForStaff
+    @StaffId INT,
+    @Status  VARCHAR(20) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        c.complaint_id,
+        c.title,
+        c.description,
+        c.priority,
+        c.status,
+        c.submission_date,
+        c.deadline,
+        c.assignment_date,
+
+        -- Department
+        d.department_name,
+
+        -- Category
+        cc.category_name,
+
+        -- Student
+        s.name         AS student_name,
+        s.email        AS student_email,
+
+        -- Unseen flag for staff
+        CASE WHEN EXISTS (
+            SELECT 1 FROM History h 
+            WHERE h.complaint_id = c.complaint_id 
+              AND h.changed_by_staff_id = @StaffId
+        ) THEN 0 ELSE 1 END AS is_new
+
+    FROM Complaints c
+    JOIN  Departments        d  ON d.department_id  = c.department_id
+    LEFT JOIN ComplaintCategories cc ON cc.category_id = c.category_id
+    JOIN  Students           s  ON s.student_id     = c.student_id
+
+    WHERE
+        c.assigned_to_staff_id = @StaffId
+        AND (@Status IS NULL OR c.status = @Status)
+
+    ORDER BY
+        -- Unseen first, then assignment date
+        CASE WHEN EXISTS (
+            SELECT 1 FROM History h 
+            WHERE h.complaint_id = c.complaint_id 
+              AND h.changed_by_staff_id = @StaffId
+        ) THEN 1 ELSE 0 END,
+        c.assignment_date DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE UpdateStaffComplaintStatus
+    @ComplaintId  INT,
+    @NewStatus    VARCHAR(20),
+    @StaffId      INT,
+    @ResultCode   INT          OUTPUT,
+    @ResultMessage VARCHAR(200) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET @ResultCode    = 0;
+    SET @ResultMessage = '';
+
+    BEGIN TRY
+        IF @NewStatus NOT IN ('Pending', 'In-Progress', 'Resolved', 'Rejected', 'Reopened')
+        BEGIN
+            SET @ResultCode    = 1;
+            SET @ResultMessage = 'Invalid status value.';
+            RETURN;
+        END
+
+        IF NOT EXISTS (SELECT 1 FROM Complaints WHERE complaint_id = @ComplaintId)
+        BEGIN
+            SET @ResultCode    = 2;
+            SET @ResultMessage = 'Complaint not found.';
+            RETURN;
+        END
+
+        IF NOT EXISTS (SELECT 1 FROM Complaints WHERE complaint_id = @ComplaintId AND assigned_to_staff_id = @StaffId)
+        BEGIN
+            SET @ResultCode    = 3;
+            SET @ResultMessage = 'Unauthorized: Complaint not assigned to you.';
+            RETURN;
+        END
+
+        DECLARE @OldStatus VARCHAR(20);
+        SELECT @OldStatus = status FROM Complaints WHERE complaint_id = @ComplaintId;
+
+        UPDATE Complaints
+        SET status = @NewStatus
+        WHERE complaint_id = @ComplaintId;
+
+        INSERT INTO History (complaint_id, changed_by_staff_id, action_type, old_status, new_status, remarks)
+        VALUES (
+            @ComplaintId,
+            @StaffId,
+            'StatusChange',
+            @OldStatus,
+            @NewStatus,
+            'Status changed from ' + @OldStatus + ' to ' + @NewStatus
+        );
+
+        SET @ResultCode    = 0;
+        SET @ResultMessage = 'Status updated successfully.';
+    END TRY
+    BEGIN CATCH
+        SET @ResultCode    = 4;
+        SET @ResultMessage = 'Error: ' + ERROR_MESSAGE();
+    END CATCH
+END;
+GO
+
+CREATE OR ALTER PROCEDURE GetStaffFeedback
+    @StaffId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT 
+        f.feedback_id,
+        f.rating,
+        f.comments,
+        f.feedback_date,
+        c.complaint_id,
+        c.title AS complaint_title,
+        s.name AS student_name
+    FROM Feedback f
+    JOIN Complaints c ON f.complaint_id = c.complaint_id
+    JOIN Students s ON f.student_id = s.student_id
+    WHERE c.assigned_to_staff_id = @StaffId
+    ORDER BY f.feedback_date DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE GetStaffNotifications
+    @StaffId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT 
+        notification_id,
+        complaint_id,
+        notification_type,
+        message,
+        is_read,
+        created_at
+    FROM Notifications
+    WHERE staff_id = @StaffId
+    ORDER BY created_at DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE MarkNotificationAsRead
+    @NotificationId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE Notifications
+    SET is_read = 1
+    WHERE notification_id = @NotificationId;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE AssignComplaintToStaff
+    @ComplaintId INT,
+    @StaffId     INT,
+    @AdminId     INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    BEGIN TRY
+        -- Update the complaint
+        UPDATE Complaints
+        SET assigned_to_staff_id = @StaffId,
+            assigned_by_admin_id = @AdminId,
+            assignment_date      = GETDATE(),
+            status               = 'In-Progress'
+        WHERE complaint_id = @ComplaintId;
+
+        -- Log to History
+        INSERT INTO History (complaint_id, changed_by_admin_id, action_type, remarks)
+        VALUES (@ComplaintId, @AdminId, 'Assignment', 'Complaint assigned to staff');
+
+        -- Create Notification for Staff
+        DECLARE @Msg VARCHAR(MAX);
+        SELECT @Msg = 'New task assigned: ' + title FROM Complaints WHERE complaint_id = @ComplaintId;
+        
+        INSERT INTO Notifications (complaint_id, staff_id, notification_type, message)
+        VALUES (@ComplaintId, @StaffId, 'Assigned', @Msg);
+
+    END TRY
+    BEGIN CATCH
+        THROW;
+    END CATCH
+END;
+GO
+
+CREATE OR ALTER PROCEDURE SubmitFeedback
+    @ComplaintId INT,
+    @StudentId   INT,
+    @Rating      INT,
+    @Comments    VARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    BEGIN TRY
+        -- 1. Insert Feedback
+        INSERT INTO Feedback (complaint_id, student_id, rating, comments)
+        VALUES (@ComplaintId, @StudentId, @Rating, @Comments);
+
+        -- 2. Find assigned staff
+        DECLARE @StaffId INT;
+        DECLARE @Title VARCHAR(200);
+        SELECT @StaffId = assigned_to_staff_id, @Title = title 
+        FROM Complaints 
+        WHERE complaint_id = @ComplaintId;
+
+        -- 3. Notify Staff (if assigned)
+        IF @StaffId IS NOT NULL
+        BEGIN
+            INSERT INTO Notifications (complaint_id, staff_id, notification_type, message)
+            VALUES (@ComplaintId, @StaffId, 'Feedback', 'New feedback received for: ' + @Title);
+        END
+
+    END TRY
+    BEGIN CATCH
+        THROW;
+    END CATCH
+END;
+GO
+
+CREATE OR ALTER PROCEDURE GetStaffAnalytics
+    @StaffId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT 
+        (SELECT COUNT(*) FROM Complaints WHERE assigned_to_staff_id = @StaffId) AS TotalAssigned,
+        (SELECT COUNT(*) FROM Complaints WHERE assigned_to_staff_id = @StaffId AND status = 'Resolved') AS Resolved,
+        (SELECT COUNT(*) FROM Complaints WHERE assigned_to_staff_id = @StaffId AND status IN ('Pending', 'In-Progress', 'Reopened')) AS Pending,
+        (SELECT ISNULL(AVG(CAST(f.rating AS DECIMAL(3,2))), 0) 
+         FROM Feedback f 
+         JOIN Complaints c ON f.complaint_id = c.complaint_id 
+         WHERE c.assigned_to_staff_id = @StaffId) AS AvgRating
+END;
+GO
+
+
+
+
+
+

@@ -10,6 +10,10 @@ import AdminReports from "./pages/admin/AdminReports";
 import AdminDepartments from "./pages/admin/AdminDepartments";
 import ManageUsers from "./pages/admin/ManageUsers";
 import AdminProfile from "./pages/admin/AdminProfile";
+import StaffComplaints from "./pages/staff/StaffComplaints";
+import StaffProfile from "./pages/staff/StaffProfile";
+import StaffFeedback from "./pages/staff/StaffFeedback";
+
 function App() {
   return (
     <BrowserRouter>
@@ -26,6 +30,9 @@ function App() {
         <Route path="/admin/departments" element={<AdminDepartments />} />
         <Route path="/admin/users" element={<ManageUsers />} />
         <Route path="/admin/profile" element={<AdminProfile />} />
+        <Route path="/staff/complaints" element={<StaffComplaints />} />
+        <Route path="/staff/profile" element={<StaffProfile />} />
+        <Route path="/staff/feedback" element={<StaffFeedback />} />
       </Routes>
     </BrowserRouter>
   );
