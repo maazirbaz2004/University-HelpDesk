@@ -121,7 +121,7 @@ export default function SubmitComplaint() {
                             {loading ? (
                                 <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Submitting...</>
                             ) : (
-                                <><span>🚀</span> Submit Complaint</>
+                                <><span></span> Submit Complaint</>
                             )}
                         </button>
                     </form>

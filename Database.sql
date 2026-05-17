@@ -131,7 +131,6 @@ CREATE TABLE Notifications
 );
 GO
 
--- Initialize flags
 UPDATE Complaints SET is_starred = 0 WHERE is_starred IS NULL;
 UPDATE Complaints SET is_major_incident = 0 WHERE is_major_incident IS NULL;
 GO
@@ -139,7 +138,6 @@ GO
 -- =============================================
 -- PROCEDURES: ADMIN
 -- =============================================
-
 -- Authenticates admin users
 CREATE OR ALTER PROCEDURE AdminLogin
     @Email         VARCHAR(100),
@@ -252,7 +250,6 @@ BEGIN
         -- 2. Log the assignment in History
         INSERT INTO History (complaint_id, changed_by_admin_id, action_type, remarks)
         VALUES (@ComplaintId, @AdminId, 'Assignment', 'Complaint assigned to staff');
-        -- Notifications are now handled automatically by trg_NotifyStaffOnAssignment trigger.
 
         COMMIT TRANSACTION;
     END TRY
@@ -1047,7 +1044,7 @@ END;
 GO
 
 -- Transaction for Complaint Submission
--- Ensures that every new complaint is atomically recorded with its corresponding history entry.
+-- Ensures that every new complaint is automatically recorded with its corresponding history entry.
 CREATE OR ALTER PROCEDURE SubmitComplaint
     @StudentId    INT,
     @DepartmentId INT,
@@ -1085,7 +1082,13 @@ BEGIN
         SET @ResultCode = 2; SET @ResultMessage = 'Error: ' + ERROR_MESSAGE();
     END CATCH
 END;
-GO
+
+select * from History;
+select * from Students
+where student_id = 4;
+
+select * from Complaints
+where student_id=4;
 
 -- Retrieves dashboard statistics for a specific student
 CREATE OR ALTER PROCEDURE GetStudentDashboardStats
@@ -1216,13 +1219,11 @@ INSERT INTO ComplaintCategories (category_name, department_id) VALUES
 ('Power Failure', 2);
 GO
 
--- =============================================
--- VIEWS
--- =============================================
 
--- [ADMIN] v_AdminComplaintOverview
--- Replaces the GetComplaintsForAdmin SP joins.
--- Backend queries this view with dynamic WHERE clauses.
+-- VIEWS
+--ADMIN
+--Replaces the GetComplaintsForAdmin SP joins.
+--Backend queries this view with dynamic WHERE clauses.
 CREATE VIEW v_AdminComplaintOverview AS
 SELECT
     c.complaint_id,
@@ -1250,10 +1251,10 @@ LEFT JOIN ComplaintCategories cat ON c.category_id  = cat.category_id
 LEFT JOIN Staff               st  ON c.assigned_to_staff_id = st.staff_id;
 GO
 
--- [STUDENT] v_StudentComplaintStatus
--- Gives each student a clean read of their own complaints
--- with resolved names instead of foreign key IDs.
--- Backend filters by student_id at query time.
+--STUDENT
+--Gives each student a clean read of their own complaints
+--with resolved names instead of foreign key IDs.
+--Backend filters by student_id at query time.
 CREATE VIEW v_StudentComplaintStatus AS
 SELECT
     c.complaint_id,
@@ -1298,13 +1299,11 @@ WHERE c.assigned_to_staff_id IS NOT NULL;
 GO
 
 
--- =============================================
--- TRIGGERS
--- =============================================
 
--- [ADMIN] trg_AutoNotifyAdminOnReopen
--- Fires after INSERT into the Complaints status = 'Reopen-Requested'.
--- Automatically notifies ALL admins.
+-- TRIGGERS
+--ADMIN
+--Fires after INSERT into the Complaints status = 'Reopen-Requested'.
+--Automatically notifies ALL admins.
 CREATE TRIGGER trg_AutoNotifyAdminOnReopen
 ON Complaints
 AFTER UPDATE
@@ -1330,9 +1329,9 @@ BEGIN
 END;
 GO
 
--- [STUDENT] trg_NotifyStudentOnStatusChange
--- Fires whenever a complaint status changes.
--- Automatically notifies the owning student.
+--STUDENT
+--Fires whenever a complaint status changes.
+--Automatically notifies the owning student.
 CREATE TRIGGER trg_NotifyStudentOnStatusChange
 ON Complaints
 AFTER UPDATE
@@ -1355,10 +1354,9 @@ BEGIN
     END
 END;
 GO
-
--- [STAFF] trg_NotifyStaffOnAssignment
--- Fires whenever a complaint is assigned to a staff member.
--- Automatically notifies the assigned staff member.
+-- staff 
+--Fires whenever a complaint is assigned to a staff member.
+--Automatically notifies the assigned staff member.
 CREATE TRIGGER trg_NotifyStaffOnAssignment
 ON Complaints
 AFTER UPDATE
@@ -1379,5 +1377,23 @@ BEGIN
         WHERE i.assigned_to_staff_id IS NOT NULL
           AND (d.assigned_to_staff_id IS NULL OR i.assigned_to_staff_id <> d.assigned_to_staff_id);
     END
+END;
+GO
+
+--automatically notifies the admin on any compaint submission
+CREATE TRIGGER trg_AutoNotifyAdminOnSubmission
+ON Complaints
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO Notifications (complaint_id, admin_id, notification_type, message)
+    SELECT
+        i.complaint_id,
+        a.admin_id,
+        'Submitted',
+        'New complaint submitted: #' + CAST(i.complaint_id AS VARCHAR(10)) + ' - ' + i.title
+    FROM inserted i
+    CROSS JOIN Admins a;
 END;
 GO
